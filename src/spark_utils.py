@@ -59,7 +59,8 @@ def read_raw_csv(spark, path):
             .option("quote", "\"")
             .option("nullValue", "")     # непроставлене значення (bank;;) -> NULL
             .option("emptyValue", "")    # порожній рядок у лапках ("") -> теж NULL
-            .csv(path))
+            .csv(str(path))
+    )
 
 def clean_sentinels(df, sentinel="?"):
     for c in df.columns:
