@@ -6,3 +6,4 @@ __pycache__/
 berka-dataset-raw/
 .DS_Store
 .pytest_cache
+scripts/trash.sql

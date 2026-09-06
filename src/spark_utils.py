@@ -95,41 +95,16 @@ def write_to_mysql(df, table_name, jdbc_url, db_user, db_password):
        .option("user", db_user)
        .option("password", db_password)
        .option("driver", "com.mysql.cj.jdbc.Driver")
-       .option("batchsize", 10000)   # для великого trans.csv — суттєво швидше за дефолт
+       .option("batchsize", 10000)   
        .mode("append")
        .save())    
 
-# if __name__ == "__main__":
-#     cfg = load_config()
-#     spark = get_spark(cfg["jdbc_jar"])
-
-#     district_raw   = read_raw_csv(spark, str(cfg["raw_dir"] / "district.csv"))
-#     district_clean = clean_sentinels(district_raw)
-
-#     district_cols = ["district_id","district_name","region","no_of_inhabitants",
-#                     "no_of_municipalities_lt_499","no_of_municipalities_500_1999",
-#                     "no_of_municipalities_2000_9999","no_of_municipalities_gt_10000",
-#                     "no_of_cities","ratio_urban_inhabitants","average_salary",
-#                     "unemployment_rate_95","unemployment_rate_96",
-#                     "no_of_entrepreneurs_per_1000","no_of_crimes_95","no_of_crimes_96"]
-
-#     district_clean = district_clean.toDF(*district_cols)  # позиційне перейменування
-
-#     int_cols = ["district_id","no_of_inhabitants","no_of_municipalities_lt_499",
-#                 "no_of_municipalities_500_1999","no_of_municipalities_2000_9999",
-#                 "no_of_municipalities_gt_10000","no_of_cities","average_salary",
-#                 "no_of_entrepreneurs_per_1000","no_of_crimes_95","no_of_crimes_96"]
-#     dec_cols = ["ratio_urban_inhabitants","unemployment_rate_95","unemployment_rate_96"]
-
-#     for c in int_cols:
-#         district_clean = district_clean.withColumn(c, F.col(c).cast("int"))
-#     for c in dec_cols:
-#         district_clean = district_clean.withColumn(c, F.col(c).cast("decimal(5,2)"))
-
-#     write_to_mysql(
-#         district_clean, 
-#         "district", 
-#         cfg["jdbc_url"],
-#         cfg["db_user"], 
-#         cfg["db_password"],
-#     )       
+def read_from_mysql(spark, jdbc_url, db_user, db_password, dbtable):
+    return (spark.read
+            .format("jdbc")
+            .option("url", jdbc_url)
+            .option("dbtable", dbtable)
+            .option("user", db_user)
+            .option("password", db_password)
+            .option("driver", "com.mysql.cj.jdbc.Driver")
+            .load())
