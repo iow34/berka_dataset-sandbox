@@ -141,3 +141,37 @@ def check_loan_after_account_open(fact_loans_df, dim_account_df, dim_date_df, ch
         "status": "OK" if violation_count == 0 else "FAIL",
         "details": f"{violation_count} loan(s) dated before account opening" if violation_count else "chronology is consistent",
     }
+
+def check_running_balance(fact_transactions_df, check_name="transaction running balance reconciliation"):
+    """
+    Accuracy check with a corrected ordering key.
+
+    IMPORTANT: interest-posting (UROK) transactions were appended to the
+    source `trans` table by a separate monthly batch process with its own,
+    much higher trans_id numbering range (confirmed by manual reconstruction
+    of several accounts in DBeaver: regular transactions ~300,000s,
+    UROK transactions ~3,440,000s for the same account). This makes raw
+    trans_id an invalid same-day tiebreaker between a UROK row and a
+    regular row -- UROK must be explicitly ordered first.
+    """
+    signed_amount = F.when(F.col("type") == "PRIJEM", F.col("amount")).otherwise(-F.col("amount"))
+    urok_first = F.when(F.col("k_symbol") == "UROK", F.lit(0)).otherwise(F.lit(1))
+
+    w = Window.partitionBy("account_id").orderBy("date_key", urok_first, "trans_id")
+
+    with_running = (fact_transactions_df
+        .withColumn("signed_amount", signed_amount)
+        .withColumn("computed_balance", F.sum("signed_amount").over(w)))
+
+    mismatches = with_running.filter(
+        F.abs(F.col("computed_balance") - F.col("balance")) > F.lit(0.01)
+    )
+    mismatch_count = mismatches.count()
+
+    result = {
+        "check": check_name,
+        "dimension": "Accuracy",
+        "status": "OK" if mismatch_count == 0 else "FAIL",
+        "details": f"{mismatch_count} row(s) where computed balance != stated balance" if mismatch_count else "balances reconcile",
+    }
+    return result, mismatches    
