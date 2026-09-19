@@ -53,7 +53,7 @@ CREATE TABLE dim_client (
     client_id    INT PRIMARY KEY,
     district_id  INT NOT NULL,
     birth_date   DATE NOT NULL,
-    gender       CHAR(1) NOT NULL COMMENT 'M/F, розкодовано з birth_number',
+    gender       CHAR(1) NOT NULL COMMENT 'M/F, decoded from birth_number',
     
     FOREIGN KEY (district_id) REFERENCES dim_district(district_id),
     
