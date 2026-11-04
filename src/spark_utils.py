@@ -1,3 +1,5 @@
+"""Local Spark configuration, source cleaning, and append-only MySQL JDBC I/O."""
+
 import os
 from pyspark.sql import SparkSession, functions as F
 from dotenv import load_dotenv, find_dotenv
@@ -5,6 +7,7 @@ from pathlib import Path
 
 
 def load_config() -> dict:
+    """Load required connection settings and resolve raw files relative to .env."""
     env_path = find_dotenv()
     if not env_path:
         raise ValueError("Can't find .env - run code from the root")
@@ -44,6 +47,7 @@ def load_config() -> dict:
     }
 
 def get_spark(jdbc_jar: str, app_name: str = "berka-clean-load") -> SparkSession:
+    """Create or reuse a local Spark session with the configured JDBC driver."""
     return (
         SparkSession.builder
         .appName(app_name)
@@ -53,21 +57,24 @@ def get_spark(jdbc_jar: str, app_name: str = "berka-clean-load") -> SparkSession
     )           
 
 def read_raw_csv(spark, path):
+    """Read semicolon-delimited source files as strings before explicit casting."""
     return (spark.read
             .option("header", "true")
             .option("delimiter", ";")
             .option("quote", "\"")
-            .option("nullValue", "")     # непроставлене значення (bank;;) -> NULL
-            .option("emptyValue", "")    # порожній рядок у лапках ("") -> теж NULL
+            .option("nullValue", "")     # Treat unquoted empty fields as NULL.
+            .option("emptyValue", "")    # Configure quoted empty fields consistently.
             .csv(str(path))
     )
 
 def clean_sentinels(df, sentinel="?"):
+    """Replace exact sentinel matches with NULL; other text is unchanged."""
     for c in df.columns:
         df = df.withColumn(c, F.when(F.col(c) == sentinel, None).otherwise(F.col(c)))
     return df            
 
 def cast_columns(df, type_map: dict[str, str]):
+    """Cast configured columns using Spark SQL type names."""
     for column_name, spark_type in type_map.items():
         df = df.withColumn(
             column_name,
@@ -76,18 +83,25 @@ def cast_columns(df, type_map: dict[str, str]):
     return df 
 
 def rename_columns(df, mapping: dict[str, str]):
+    """Rename source fields to their configured database column names."""
     for old_name, new_name in mapping.items():
         df = df.withColumnRenamed(old_name, new_name)
     return df
 
 
 def prepare_table(df, col_rename: dict[str, str], col_types: dict[str, str]):
+    """Clean sentinels, rename, select configured fields, and cast their types."""
     df = clean_sentinels(df)
     df = rename_columns(df, col_rename)
     df = df.select(*col_rename.values())
     return cast_columns(df, col_types)
 
 def write_to_mysql(df, table_name, jdbc_url, db_user, db_password):
+    """Append to an existing table; reruns can fail on duplicate primary keys.
+
+    The DDL must be applied separately. This helper provides neither an upsert
+    nor a transaction covering all tables in a notebook run.
+    """
     (df.write
        .format("jdbc")
        .option("url", jdbc_url)
@@ -100,6 +114,7 @@ def write_to_mysql(df, table_name, jdbc_url, db_user, db_password):
        .save())    
 
 def read_from_mysql(spark, jdbc_url, db_user, db_password, dbtable):
+    """Read a MySQL table or an aliased subquery through Connector/J."""
     return (spark.read
             .format("jdbc")
             .option("url", jdbc_url)

@@ -1,3 +1,10 @@
+"""Data-quality checks used by the validation notebook.
+
+Results contain check, dimension, status, and details. The not-null check
+returns a list; balance reconciliation returns a result plus mismatch rows.
+These labels organize this project and do not imply formal certification.
+"""
+
 from pyspark.sql import functions as F
 from pyspark.sql import Window
 
@@ -64,7 +71,8 @@ def check_allowed_values(df, col, allowed_values, check_name):
     Validity check: verify that every value in `col` belongs to a known,
     business-approved set of values (its "domain"). A value can be
     non-NULL (passes Completeness) and still be invalid if it falls
-    outside this domain.
+    outside this domain. SQL NULLs are not counted by this predicate; use
+    check_not_null separately when the field is required.
     """
     invalid_count = df.filter(~F.col(col).isin(allowed_values)).count()
     return {
@@ -78,7 +86,8 @@ def check_loan_after_account_open(fact_loans_df, dim_account_df, dim_date_df, ch
     """
     Consistency check: verify that a loan's date is never earlier than
     the date its account was opened -- a simple cross-table business
-    logic sanity check.
+    logic sanity check. Inner joins omit unresolved keys, so run the separate
+    referential-integrity checks as well.
     """
     joined = (fact_loans_df
         .join(dim_date_df.select("date_key", "full_date"), "date_key")
@@ -95,6 +104,14 @@ def check_loan_after_account_open(fact_loans_df, dim_account_df, dim_date_df, ch
     }
     
 def check_running_balance(fact_transactions_df, check_name="transaction running balance reconciliation"):
+    """Compare cumulative signed amounts with source balances at 0.01 tolerance.
+
+    PRIJEM is treated as inflow and every other type as outflow. Within each
+    account/day, UROK interest rows sort first, then trans_id breaks ties.
+    This is the investigation's ordering assumption, not a source timestamp.
+    The calculation assumes a zero opening balance and complete history;
+    an early difference can propagate to many subsequent rows.
+    """
     signed_amount = F.when(F.col("type") == "PRIJEM", F.col("amount")).otherwise(-F.col("amount"))
     urok_first = F.when(F.col("k_symbol") == "UROK", F.lit(0)).otherwise(F.lit(1))
 
@@ -115,4 +132,4 @@ def check_running_balance(fact_transactions_df, check_name="transaction running 
         "status": "OK" if mismatch_count == 0 else "FAIL",
         "details": f"{mismatch_count} row(s) where computed balance != stated balance" if mismatch_count else "balances reconcile",
     }
-    return result, mismatches 
+    return result, mismatches

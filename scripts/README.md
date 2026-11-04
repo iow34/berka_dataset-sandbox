@@ -1,37 +1,35 @@
-# scripts
+# Database definitions
 
-DDL for both database layers. Run once, by hand, in DBeaver — nothing in
-`src/` or `notebooks/` executes these.
+Apply these scripts manually using a MySQL client or DBeaver before loading data.
+Neither the Python modules nor the notebooks create the schema for you.
+Both scripts select `bank_sandbox`; create that database first.
 
-## tables_raw.sql
+1. [tables_raw.sql](tables_raw.sql): eight source-shaped tables with primary keys,
+   foreign keys, indexes, and explicit nullability. Dates remain source strings;
+   conversion happens in notebook `02`. SQL column comments explain encodings and
+   optional fields in English.
+2. [tables_trx_data_model.sql](tables_trx_data_model.sql): four dimensions, a
+   client-account bridge, and three fact tables. See the
+   [model reference](../docs/DATA_MODEL.md) for grains and relationships.
 
-The eight bronze tables `01_load_and_clean.ipynb` loads into. Types stay
-close to the source: dates are `CHAR(6)`, not `DATE`, because the
-source's raw `YYMMDD` strings don't parse cleanly and real date
-conversion is deferred to the star-schema build. `NOT NULL` vs. nullable
-was decided by looking at actual sample data rather than guessing —
-where a column is nullable, the comment says why (Prague's `?` sentinel
-in two `district` columns, a few genuinely optional fields in `order`
-and `trans`).
+These are initial DDL scripts, not migrations: rerunning `CREATE TABLE` against
+existing tables fails. Inserts append to existing tables, preserving their DDL;
+repeating a load normally fails on duplicate primary keys, rather than silently
+creating duplicate keys.
 
-Foreign keys and indexes exist here too, even though this is the "raw"
-layer — deliberately, not an oversight. It means a broken reference
-fails loudly at insert time in `01_load_and_clean.ipynb`, instead of
-loading silently and only surfacing later as a Completeness failure in
-`03_validation.ipynb`. Run before `01_load_and_clean.ipynb`; table order
-in the file follows the same FK dependency chain as `LOAD_ORDER` in
-`src/table_configs.py`.
+## Optional reset block
 
-## tables_trx_data_model.sql
+The commented SQL at the top of `tables_trx_data_model.sql` is a **destructive reset
+of the eight model tables only**. It is retained as an operational reference, not
+executed setup. If you deliberately need to rebuild disposable model data:
 
-The eight star-schema tables `02_build_star_schema.ipynb` writes into —
-four dimensions, a bridge table, three facts. This is where dates
-finally become real `DATE` columns, and where `dim_client.gender` /
-`birth_date` live instead of the raw `birth_number`.
+1. Confirm the connection and selected database are the intended local sandbox.
+2. Preserve anything you need before clearing it.
+3. Select `bank_sandbox` before executing the reset block; the file's `USE` statement
+   appears after the block.
+4. Execute only the reset block, including restoration of `FOREIGN_KEY_CHECKS = 1`.
+   Do not rerun the `CREATE TABLE` statements for existing tables.
+5. Rerun notebook `02`, then validate with `03`.
 
-The commented-out block at the top is a reset: `TRUNCATE` on all eight
-tables with `FOREIGN_KEY_CHECKS` off around it. Uncomment and run it
-before re-running `02_build_star_schema.ipynb` from scratch — that
-notebook's `write_to_mysql` calls only ever append, so re-running it
-against already-populated tables produces duplicates rather than an
-error.
+This does not reset raw tables or make notebook `01` repeatable. A partial load
+requires deliberate recovery. No reset was run during the documentation review.

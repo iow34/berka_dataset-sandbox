@@ -1,4 +1,7 @@
 
+-- Optional destructive reset of model tables only. Select bank_sandbox first.
+-- Run this block separately, not together with the CREATE TABLE statements.
+-- Disabling foreign-key checks bypasses integrity protection for this session.
 -- SET FOREIGN_KEY_CHECKS = 0;
 -- TRUNCATE TABLE fact_transactions;
 -- TRUNCATE TABLE fact_loans;

@@ -1,7 +1,14 @@
+"""Owner-attributed transaction features and exploratory loan-status flags."""
+
 from pyspark.sql import functions as F
 
 
 def build_client_transaction_profile(fact_transactions, bridge, dim_date, disposition_type="OWNER"):
+    """Aggregate transactions for linked clients with the selected disposition.
+
+    Inner joins exclude clients without matching transactions or date records.
+    An account linked to multiple selected clients contributes to each client.
+    """
 
     owner_links = (bridge
         .filter(F.col("disposition_type") == disposition_type)
@@ -31,6 +38,7 @@ def build_client_transaction_profile(fact_transactions, bridge, dim_date, dispos
     return profile
 
 def add_behavioral_features(profile, snapshot_day):
+    """Add recency and monthly frequency based on all postings, including UROK."""
     return (
         profile
         .withColumn(
@@ -48,6 +56,11 @@ def add_behavioral_features(profile, snapshot_day):
     )
 
 def add_client_initiated_recency(profile, fact_transactions, bridge, dim_date, snapshot_date, disposition_type="OWNER"):
+    """Add recency excluding UROK, retaining transactions with NULL k_symbol.
+
+    The function name describes a proxy: a non-interest posting is not proof
+    of client initiation. Clients with no such posting receive NULL recency.
+    """
     owner_links = (bridge
         .filter(F.col("disposition_type") == disposition_type)
         .select("client_id", "account_id"))
@@ -70,6 +83,7 @@ def add_client_initiated_recency(profile, fact_transactions, bridge, dim_date, s
     )    
 
 def build_loan_status_flags(fact_loans, bridge, disposition_type="OWNER"):
+    """Flag clients with at least one linked loan in source status B or D."""
     owner_links = (bridge
         .filter(F.col("disposition_type") == disposition_type)
         .select("client_id", "account_id"))
@@ -82,4 +96,4 @@ def build_loan_status_flags(fact_loans, bridge, disposition_type="OWNER"):
             F.count("*").alias("loan_count"),
             F.max(F.when(F.col("status").isin("B", "D"), 1).otherwise(0)).alias("has_problem_loan")
         )
-    )    
+    )

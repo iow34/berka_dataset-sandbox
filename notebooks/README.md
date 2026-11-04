@@ -1,72 +1,59 @@
-# Notebooks
+# Notebook workflow
 
-Five notebooks, run in order. Each one reads from and writes to the same
-MySQL sandbox database (`bank_sandbox`); shared logic lives in `../src/`.
+Use the [setup guide](../docs/SETUP.md) first. Run with `notebooks/` as the working
+directory so the existing `sys.path.append("..")` resolves `src/` correctly.
+Restart the kernel between notebooks to release cached data and Spark sessions.
 
-## 01_load_and_clean.ipynb
+| Order | Notebook | Reads | Writes / result |
+| --- | --- | --- | --- |
+| 01 | [Load and clean](01_load_and_clean.ipynb) | Eight local source files | Appends to eight MySQL raw tables |
+| 02 | [Build model](02_build_star_schema.ipynb) | MySQL raw tables | Appends to four dimensions, a bridge, and three facts |
+| 03 | [Validate](03_validation.ipynb) | Raw and model tables | Displays eight raw counts and a 28-row quality report |
+| 04 | [Investigate balances](04_investigation_balance_mismatch.ipynb) | `fact_transactions` | Displays diagnostic aggregates and sample-account reasoning |
+| 05 | [Analyze client behavior](05_client_behavior_analysis.ipynb) | Model tables | Displays client profiles, segments, and loan-status comparisons |
 
-Loads the eight raw Berka `.asc` files, cleans them, and writes them into
-MySQL bronze tables using the per-table configs in `src/table_configs.py`.
-Cleaning handles two source quirks: `?` as a sentinel for missing numeric
-values in `district.asc`, and inconsistent empty-vs-null handling in
-`trans.asc` (`k_symbol`, `bank`, `account`).
+Only `01` and `02` write database data. Neither is safe to rerun blindly against
+populated tables: writes use append mode and existing primary keys reject repeats.
+Notebooks `03`–`05` read the database; their derived DataFrames are not persisted.
 
-Loads in FK-safe order — district → client → account → disp → card, loan,
-order → trans. Row counts match the documented dataset sizes: 77 / 5,369 /
-4,500 / 5,369 / 892 / 682 / 6,471 / 1,056,320.
+## Source cleaning and model construction
 
-## 02_build_star_schema.ipynb
+`01` replaces exact `?` sentinels, renames and selects configured columns, and
+casts types. Source dates remain strings in the raw layer. The loader expects
+`district.csv`, whereas the upstream distribution calls it `district.asc`.
 
-Builds a Kimball-style star schema on top of the bronze tables: a
-generated `dim_date` (1993–1998), `dim_district`, `dim_client` (decodes
-`birth_number` into `birth_date` + `gender`), `dim_account`, a
-`bridge_client_account` table for the client↔account many-to-many
-relationship, and three fact tables — `fact_transactions`, `fact_loans`,
-`fact_orders`. Transform logic is in `src/dimensional_model.py`.
+`02` generates a calendar from 1993-01-01 through 1998-12-31, decodes client birth
+numbers, converts historical dates, and maps account-level records to facts.
+The [data model guide](../docs/DATA_MODEL.md) defines each table's grain.
 
-## 03_validation.ipynb
+## Quality and investigation
 
-The validation suite: referential integrity, primary key uniqueness,
-not-null checks, and domain checks (`src/validations.py`), run against
-every table in the star schema and reported as a single pandas table.
+`03` checks selected keys, fields, domains, balance arithmetic, and loan chronology.
+It displays statuses; a `FAIL` does not automatically raise an exception or stop
+execution. Inspect every result, including raw-table `MISMATCH` messages.
 
-Everything passes except the transaction balance reconciliation check
-(Accuracy). That failure is expected — see
-`04_investigation_balance_mismatch.ipynb` for why, and don't "fix" it by
-loosening the threshold.
+`04` compares naive transaction ordering with the implemented interest-first
+ordering assumption. Earlier notes report fewer mismatches after the change,
+with many remaining. Separate-batch processing and source rounding remain
+explanations to investigate, not established facts about the original bank.
+The investigation also contains a whole-unit-rounded exploratory check; it cannot
+measure differences of 0.10. See [validation evidence](../docs/VALIDATION.md).
 
-## 04_investigation_balance_mismatch.ipynb
+## Client analytics
 
-Root-causes the balance reconciliation failure from `03`. Two things
-turned out to be going on, not one:
+`05` attributes transactions through `OWNER` links and derives RFM-style quartiles:
+recency excluding `UROK`, frequency per active month, and signed net cash flow.
+Excluding interest is a proxy for activity, not proof of client initiation. Other
+automated postings can remain. Frequency and net flow still include interest.
 
-- `UROK` (interest) transactions are inserted by a monthly batch process
-  with a `trans_id` range disjoint from regular transactions, which
-  breaks `trans_id` as a same-day ordering key. Fixed by sorting `UROK`
-  first on ties, implemented in `check_running_balance`. This alone only
-  brought mismatches from 865,166 down to 795,450 — smaller than
-  expected, which is what pushed the investigation from aggregate counts
-  down to a single account (`account_id = 1033`).
-- Even with ordering fixed, `UROK` amounts are systematically ~0.10 off
-  from the actual balance change, and the error compounds across each
-  account's later interest postings. Reads like a rounding convention
-  from the original banking system rather than anything we can correct
-  from the data available here.
+Segment labels are exploratory rules. Loan-status percentages include clients
+with no loans in the denominator and are not borrower default rates or predictive
+performance. No statistical or causal conclusion is claimed.
 
-## 05_client_behavior_analysis.ipynb
+## Execution evidence
 
-Builds a client-level transaction profile (attributed via `OWNER`
-disposition) and an RFM segmentation (`ntile(4)` per dimension); helpers
-in `src/client_analytics.py`.
-
-One thing worth flagging for anyone reusing this: the raw "last
-transaction date" per client is almost always the dataset's final day,
-1998-12-31 — same UROK batch job as in `04`, hitting nearly every open
-account on the last day of the month. Recency here is computed off
-client-initiated transactions only (`k_symbol != UROK`) to avoid that.
-
-Cross-tabbing RFM segment against `fact_loans.status` didn't show a
-clean relationship — if anything, "Champions" had a *higher* problem-loan
-rate than "At Risk" (2.7% vs. 1.0%). The underlying counts are small
-(5–34 problem-loan clients per segment), so this isn't a result to lean
-on in either direction.
+All five notebooks currently have empty outputs. Narrative numbers from earlier
+work are not a substitute for a saved run. For a shareable result, execute against
+the intended local database, retain aggregate results, record environment versions
+and the Git commit, and remove credentials or machine-specific diagnostics before
+committing. The [validation guide](../docs/VALIDATION.md) lists the required evidence.

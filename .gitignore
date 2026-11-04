@@ -8,3 +8,4 @@ berka-dataset-raw/
 .pytest_cache
 scripts/trash.sql
 *.jar
+own/

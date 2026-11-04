@@ -1,3 +1,9 @@
+"""Source filenames, field mappings, Spark types, and foreign-key load order.
+
+The loader expects district.csv; the upstream distribution names it district.asc.
+All eight files use semicolon delimiters regardless of their extension.
+"""
+
 LOAD_ORDER = [
     "district",
     "client",

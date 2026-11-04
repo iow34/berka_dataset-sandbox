@@ -1,7 +1,10 @@
+"""Calendar and demographic transforms for the historical Berka dataset."""
+
 from pyspark.sql import functions as F
 
 
 def build_dim_date(spark, start_date: str, end_date: str):
+    """Build an inclusive calendar with YYYYMMDD keys and Sunday numbered 1."""
     date_range = spark.sql(f"""
         SELECT explode(sequence(
             to_date('{start_date}'), to_date('{end_date}'), interval 1 day
@@ -24,6 +27,7 @@ def build_dim_date(spark, start_date: str, end_date: str):
 
 
 def parse_yymmdd_to_date(df, col_name: str, new_col_name: str):
+    """Parse YYMMDD with a fixed 1900s century assumption for this dataset."""
     return df.withColumn(
         new_col_name,
         F.to_date(F.concat(F.lit("19"), F.col(col_name)), "yyyyMMdd"),
@@ -31,6 +35,11 @@ def parse_yymmdd_to_date(df, col_name: str, new_col_name: str):
 
 
 def decode_birth_number(df):
+    """Decode the source birth number into a date and the source gender code.
+
+    Female birth numbers encode the month with an offset of 50. This transform
+    assumes valid historical source values; it is not a general ID validator.
+    """
     yy = F.substring("birth_number", 1, 2)
     mm_raw = F.substring("birth_number", 3, 2).cast("int")
     dd = F.substring("birth_number", 5, 2)
